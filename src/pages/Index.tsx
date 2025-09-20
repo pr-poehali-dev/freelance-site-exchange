@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Icon from '@/components/ui/icon';
+import AuthModal from '@/components/AuthModal';
 
 interface Project {
   id: number;
@@ -36,10 +37,23 @@ interface Freelancer {
   location: string;
 }
 
+interface User {
+  id: number;
+  email: string;
+  userType: 'client' | 'freelancer';
+  firstName: string;
+  lastName: string;
+  profileId?: number;
+}
+
 function Index() {
   const [currentLang, setCurrentLang] = useState<'ru' | 'en' | 'de'>('ru');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('projects');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [user, setUser] = useState<User | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
 
   const translations = {
     ru: {
@@ -108,6 +122,67 @@ function Index() {
   };
 
   const t = translations[currentLang];
+
+  // Проверка сессии при загрузке
+  useEffect(() => {
+    const savedToken = localStorage.getItem('sessionToken');
+    if (savedToken) {
+      checkSession(savedToken);
+    }
+  }, []);
+
+  const checkSession = async (token: string) => {
+    try {
+      const response = await fetch('https://functions.poehali.dev/1846285e-3b9e-4fb9-b7b2-f8fe7dd104f5', {
+        method: 'GET',
+        headers: {
+          'X-Session-Token': token
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user);
+        setSessionToken(token);
+      } else {
+        localStorage.removeItem('sessionToken');
+      }
+    } catch (error) {
+      localStorage.removeItem('sessionToken');
+    }
+  };
+
+  const handleAuthSuccess = (userData: User, token: string) => {
+    setUser(userData);
+    setSessionToken(token);
+    localStorage.setItem('sessionToken', token);
+  };
+
+  const handleLogout = async () => {
+    if (sessionToken) {
+      try {
+        await fetch('https://functions.poehali.dev/1846285e-3b9e-4fb9-b7b2-f8fe7dd104f5', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': sessionToken
+          },
+          body: JSON.stringify({ action: 'logout' })
+        });
+      } catch (error) {
+        console.error('Logout error:', error);
+      }
+    }
+    
+    setUser(null);
+    setSessionToken(null);
+    localStorage.removeItem('sessionToken');
+  };
+
+  const openAuthModal = (mode: 'login' | 'register') => {
+    setAuthMode(mode);
+    setShowAuthModal(true);
+  };
 
   const sampleProjects: Project[] = [
     {
@@ -322,12 +397,35 @@ function Index() {
                 </SelectContent>
               </Select>
               
-              <Button variant="outline" size="sm">
-                {t.login}
-              </Button>
-              <Button size="sm" className="bg-primary-500 hover:bg-primary-600 text-white">
-                {t.register}
-              </Button>
+              {user ? (
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-primary-100 text-primary-600 text-sm">
+                        {user.firstName[0]}{user.lastName[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-medium text-gray-700">
+                      {user.firstName} {user.lastName}
+                    </span>
+                    <Badge variant="outline" className="text-xs">
+                      {user.userType === 'client' ? 'Заказчик' : 'Исполнитель'}
+                    </Badge>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleLogout}>
+                    Выйти
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => openAuthModal('login')}>
+                    {t.login}
+                  </Button>
+                  <Button size="sm" className="bg-primary-500 hover:bg-primary-600 text-white" onClick={() => openAuthModal('register')}>
+                    {t.register}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -467,6 +565,14 @@ function Index() {
           </div>
         </div>
       </footer>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onAuthSuccess={handleAuthSuccess}
+        initialMode={authMode}
+      />
     </div>
   );
 }
